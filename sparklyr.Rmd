@@ -1,0 +1,80 @@
+---
+title: "R Notebook"
+output:
+  html_notebook: default
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# Installation
+
+* We use renv package for package version management and git for version control. Call renv::snapshot() to save state call renv::restore() to revert to the previous state.
+* We install devtools, the last version of sparklyr and some data.
+
+```{r}
+install.packages(c("devtools", "tidyverse"))
+devtools::install_github("rstudio/sparklyr")
+install.packages(c("nycflights13", "Lahman"))
+library(sparklyr)
+library(tidyverse)
+spark_available_versions()
+spark_uninstall(version = '3.0.1', hadoop_version = '3.2')
+spark_install(version = '3.0.1', hadoop_version = '3.2')
+spark_installed_versions()
+renv::snapshot()
+```
+
+We connect to spark and copy some data from R into the Spark:
+
+```{r}
+
+sc <- spark_connect(master = "local")
+iris_tbl <- copy_to(sc, iris)
+flights_tbl <- copy_to(sc, nycflights13::flights, "flights")
+batting_tbl <- copy_to(sc, Lahman::Batting, "batting")
+src_tbls(sc)
+
+```
+
+We can filter data in Spark:
+
+```{r}
+flights_tbl %>% filter(dep_delay == 2)
+```
+
+And also do some aggregation and plotting:
+
+```{r}
+delay <- flights_tbl %>%
+  group_by(tailnum) %>%
+  summarise(count = n(), dist = mean(distance), delay = mean(arr_delay, na.rm = TRUE)) %>%
+  filter(count > 20, dist < 2000, !is.na(delay)) %>%
+  collect
+ggplot(delay, aes(dist, delay)) +
+  geom_point(aes(size = count), alpha = 1/2) +
+  geom_smooth() +
+  scale_size_area(max_size = 2)
+```
+
+Where an aggregation function, like sum() and mean(), takes n inputs and return a single value, a window function returns n values. The output of a window function depends on all its input values, so window functions don’t include functions that work element-wise, like + or round(). Window functions include variations on aggregate functions, like cumsum() and cummean(), functions for ranking and ordering, like rank(), and functions for taking offsets, like lead() and lag().
+ 
+```{r}
+batting_tbl %>%
+  select(playerID, yearID, teamID, G, AB:H) %>%
+  group_by(playerID) %>%
+  filter(min_rank(desc(H)) <= 2 & H > 0) %>%
+  arrange(playerID, yearID, teamID) 
+
+```
+
+Using SQL to query Spark
+
+```{r}
+library(DBI)
+iris_preview <- dbGetQuery(sc, "SELECT * FROM iris LIMIT 10")
+iris_preview
+```
+
+
+
